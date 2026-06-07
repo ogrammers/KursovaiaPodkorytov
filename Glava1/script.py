@@ -44,6 +44,111 @@ for col in ["sqft", "beds", "baths", "baths_full", "year_built", "stories", "gar
 
 print(f"Датасет загружен: {len(df)} записей, {df.shape[1]} признаков")
 
+
+def print_analysis_report():
+    """Печатает в консоль основные результаты первичного анализа датасета."""
+    print()
+    print("=" * 70)
+    print("ПЕРВИЧНЫЙ АНАЛИЗ: California Sold Properties 2026")
+    print("=" * 70)
+
+    print("\nШАГ 0: Структура датасета")
+    print(f"Исходный размер                 : {df_raw.shape[0]} строк, {df_raw.shape[1]} признаков")
+    print(f"После удаления дублей и NaN target: {df.shape[0]} строк, {df.shape[1]} признаков")
+    print(f"Дубликатов в исходных данных    : {df_raw.duplicated().sum()}")
+    print(f"Строк без целевого listPrice    : {df_raw['listPrice'].isna().sum()}")
+    print("Типы признаков:")
+    print(df_raw.dtypes.astype(str).to_string())
+
+    print("\nШАГ 1: Целевой признак listPrice")
+    target = df_raw["listPrice"].dropna()
+    print(f"Количество значений             : {len(target)}")
+    print(f"Минимум                         : ${target.min():,.0f}")
+    print(f"Медиана                         : ${target.median():,.0f}")
+    print(f"Среднее                         : ${target.mean():,.0f}")
+    print(f"Максимум                        : ${target.max():,.0f}")
+    print("Интерпретация: распределение цены правосторонне асимметрично, дорогие объекты повышают среднее.")
+
+    print("\nШАГ 2: Пропущенные значения")
+    missing = (
+        pd.DataFrame({
+            "Кол-во пропусков": df_raw.isna().sum(),
+            "Доля, %": df_raw.isna().mean() * 100
+        })
+        .query("`Кол-во пропусков` > 0")
+        .sort_values("Доля, %", ascending=False)
+    )
+    if missing.empty:
+        print("Пропуски не обнаружены.")
+    else:
+        print(missing.to_string(formatters={"Доля, %": lambda x: f"{x:.1f}"}))
+        print("Вывод: основной проблемный признак - sub_type; для числовых признаков возможна медианная импутация.")
+
+    print("\nШАГ 3: Выбросы по методу IQR")
+    outlier_cols = ["listPrice", "sqft", "beds", "baths", "year_built", "garage", "stories"]
+    rows = []
+    for col in outlier_cols:
+        series = df_raw[col].dropna()
+        if series.empty:
+            continue
+        q1 = series.quantile(0.25)
+        q3 = series.quantile(0.75)
+        iqr = q3 - q1
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+        count = ((series < lower) | (series > upper)).sum()
+        rows.append({
+            "Признак": col,
+            "Нижняя граница": lower,
+            "Верхняя граница": upper,
+            "Выбросов": int(count),
+            "Доля, %": count / len(series) * 100
+        })
+    outliers = pd.DataFrame(rows)
+    print(outliers.to_string(
+        index=False,
+        formatters={
+            "Нижняя граница": lambda x: f"{x:,.2f}",
+            "Верхняя граница": lambda x: f"{x:,.2f}",
+            "Доля, %": lambda x: f"{x:.1f}"
+        }
+    ))
+    bad_garage = (df_raw["garage"] > 20).sum()
+    print(f"Предметная проверка: garage > 20 найдено {bad_garage} строк; значение 999 трактуется как ошибка.")
+
+    print("\nШАГ 4: Корреляционный анализ")
+    corr_cols = ["listPrice", "sqft", "beds", "baths", "year_built", "garage", "stories"]
+    corr = df[corr_cols].corr()["listPrice"].drop("listPrice").sort_values(key=lambda s: s.abs(), ascending=False)
+    print("Корреляция признаков с listPrice:")
+    print(corr.to_string(float_format=lambda x: f"{x:.2f}"))
+    print("Вывод: наиболее заметная линейная связь с ценой наблюдается у площади объекта sqft.")
+
+    print("\nШАГ 5: Категориальные признаки")
+    print("Распределение type:")
+    type_table = pd.DataFrame({
+        "Кол-во": df["type"].value_counts(),
+        "Доля, %": df["type"].value_counts(normalize=True) * 100
+    })
+    print(type_table.to_string(formatters={"Доля, %": lambda x: f"{x:.1f}"}))
+    print("\nРаспределение sub_type в исходных данных:")
+    sub_table = pd.DataFrame({
+        "Кол-во": df_raw["sub_type"].fillna("(нет данных)").value_counts(),
+        "Доля, %": df_raw["sub_type"].fillna("(нет данных)").value_counts(normalize=True) * 100
+    })
+    print(sub_table.to_string(formatters={"Доля, %": lambda x: f"{x:.1f}"}))
+
+    print("\nШАГ 6: Рекомендации по предобработке")
+    print("- удалить дубликаты и строки без listPrice;")
+    print("- заменить ошибочные значения garage, например 999, на NaN;")
+    print("- заполнить умеренные пропуски числовых признаков медианой по type;")
+    print("- для sub_type рассмотреть исключение признака или укрупнение категории из-за 82,8% пропусков;")
+    print("- логарифмировать listPrice для ослабления правосторонней асимметрии;")
+    print("- применить One-Hot Encoding к type и масштабирование числовых признаков.")
+    print("=" * 70)
+
+
+print_analysis_report()
+
 # ─────────────────────────────────────────────────────────────
 # НАСТРОЙКИ СТИЛЯ (Matplotlib / Seaborn)
 # ─────────────────────────────────────────────────────────────
@@ -284,7 +389,60 @@ print("✓ Рис. 6 сохранён → рис6_boxplot_type_price.html")
 print("  Откройте HTML в браузере и нажмите 📷 в правом верхнем углу графика")
 
 # ─────────────────────────────────────────────────────────────
-# РИС. 7 — Тепловая карта корреляций (Seaborn)
+# РИС. 7 — Доля пропущенных значений по признакам (Matplotlib)
+# ─────────────────────────────────────────────────────────────
+
+missing_stats = (
+    pd.DataFrame({
+        "missing_count": df_raw.isnull().sum(),
+        "missing_pct": df_raw.isnull().mean() * 100
+    })
+    .query("missing_count > 0")
+    .sort_values("missing_pct", ascending=True)
+)
+
+fig, ax = plt.subplots(figsize=(11, 6))
+colors = [
+    "#DE2D26" if pct >= 60 else "#FD8D3C" if pct >= 20 else "#6BAED6"
+    for pct in missing_stats["missing_pct"]
+]
+bars = ax.barh(
+    missing_stats.index,
+    missing_stats["missing_pct"],
+    color=colors,
+    edgecolor="#333333",
+    linewidth=0.4
+)
+
+ax.set_xlabel("Доля пропусков, %")
+ax.set_ylabel("")
+ax.set_xlim(0, 100)
+ax.grid(axis="x", color="#E0E0E0", linewidth=0.8)
+ax.set_axisbelow(True)
+ax.spines[["top", "right"]].set_visible(False)
+
+for bar, (_, row) in zip(bars, missing_stats.iterrows()):
+    label = f"{int(row['missing_count'])} строк ({row['missing_pct']:.1f}%)"
+    ax.text(
+        row["missing_pct"] + 1.2,
+        bar.get_y() + bar.get_height() / 2,
+        label,
+        va="center",
+        fontsize=9,
+        color="#222222"
+    )
+
+plt.suptitle(
+    "Рисунок 7. Доля пропущенных значений по признакам датасета",
+    fontsize=12
+)
+plt.tight_layout()
+plt.savefig("рис7_missing_values_bar.png")
+plt.show()
+print("✓ Рис. 7 сохранён → рис7_missing_values_bar.png")
+
+# ─────────────────────────────────────────────────────────────
+# РИС. 8 — Тепловая карта корреляций (Seaborn)
 # ─────────────────────────────────────────────────────────────
 
 corr_cols  = ["listPrice", "sqft", "beds", "baths", "year_built", "garage", "stories"]
@@ -307,50 +465,13 @@ sns.heatmap(
     ax=ax,
 )
 plt.suptitle(
-    "Рисунок 7. Тепловая карта корреляционной матрицы числовых признаков",
+    "Рисунок 8. Тепловая карта корреляционной матрицы числовых признаков",
     fontsize=12
 )
 plt.tight_layout()
-plt.savefig("рис7_heatmap_corr.png")
+plt.savefig("рис8_heatmap_corr.png")
 plt.show()
-print("✓ Рис. 7 сохранён → рис7_heatmap_corr.png")
-
-# ─────────────────────────────────────────────────────────────
-# РИС. 8 — Тепловая карта пропущенных значений (Seaborn)
-# ─────────────────────────────────────────────────────────────
-
-miss_cols = [
-    c for c in df_raw.columns
-    if df_raw[c].isnull().any() and c != "sanitized_property_summary"
-]
-sample8 = df_raw[miss_cols].sample(n=500, random_state=42)
-
-fig, ax = plt.subplots(figsize=(12, 5))
-sns.heatmap(
-    sample8.isnull().T,
-    cmap=["#EBF5FB", "#2171B5"],
-    cbar=False,
-    yticklabels=miss_cols,
-    xticklabels=False,
-    linewidths=0,
-    ax=ax,
-)
-ax.set_xlabel("Записи (выборка 500 шт.)", labelpad=8)
-ax.set_ylabel("")
-
-for i, col in enumerate(miss_cols):
-    pct = df_raw[col].isnull().mean() * 100
-    ax.text(503, i + 0.5, f"{pct:.1f}%",
-            va="center", ha="left", fontsize=10, color="#154360")
-
-plt.suptitle(
-    "Рисунок 8. Тепловая карта пропущенных значений датасета",
-    fontsize=12
-)
-plt.tight_layout()
-plt.savefig("рис8_heatmap_missing.png")
-plt.show()
-print("✓ Рис. 8 сохранён → рис8_heatmap_missing.png")
+print("✓ Рис. 8 сохранён → рис8_heatmap_corr.png")
 
 # ─────────────────────────────────────────────────────────────
 # РИС. 9 — Категориальные признаки (Matplotlib)
@@ -415,8 +536,8 @@ files = [
     ("PNG",  "рис4_scatter_year_price.png"),
     ("HTML", "рис5_histogram_price.html   ← открыть в браузере, нажать 📷"),
     ("HTML", "рис6_boxplot_type_price.html  ← открыть в браузере, нажать 📷"),
-    ("PNG",  "рис7_heatmap_corr.png"),
-    ("PNG",  "рис8_heatmap_missing.png"),
+    ("PNG",  "рис7_missing_values_bar.png"),
+    ("PNG",  "рис8_heatmap_corr.png"),
     ("PNG",  "рис9_categorical.png"),
 ]
 for fmt, name in files:

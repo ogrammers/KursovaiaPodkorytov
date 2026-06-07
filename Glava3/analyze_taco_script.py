@@ -378,17 +378,63 @@ def step4_annotation_analysis(df):
     plt.close()
     print("[Сохранено] fig6_annotation_analysis.png")
 
-    # Тепловая карта центров BB
-    cx_vals = ann_df['cx'].dropna().values
-    cy_vals = ann_df['cy'].dropna().values
+    # Распределение центров BB по 9 зонам кадра
+    zone_df = ann_df[['cx', 'cy']].dropna().copy()
+    zone_df['x_zone'] = pd.cut(
+        zone_df['cx'],
+        bins=[0, 1/3, 2/3, 1],
+        labels=['левая', 'центральная', 'правая'],
+        include_lowest=True
+    )
+    zone_df['y_zone'] = pd.cut(
+        zone_df['cy'],
+        bins=[0, 1/3, 2/3, 1],
+        labels=['верхняя', 'средняя', 'нижняя'],
+        include_lowest=True
+    )
+    zone_df['zone'] = zone_df['y_zone'].astype(str) + ' ' + zone_df['x_zone'].astype(str)
 
-    fig2, ax2 = plt.subplots(figsize=(7, 6))
-    h = ax2.hist2d(cx_vals, cy_vals, bins=40, cmap='YlOrRd')
-    plt.colorbar(h[3], ax=ax2, label='Количество объектов')
-    ax2.set_title('Тепловая карта центров ограничивающих рамок\n'
-                  '(0,0 — верхний левый угол; 1,1 — нижний правый)', fontsize=11)
-    ax2.set_xlabel('cx (нормализованная x-координата)')
-    ax2.set_ylabel('cy (нормализованная y-координата)')
+    zone_order = [
+        'верхняя левая', 'верхняя центральная', 'верхняя правая',
+        'средняя левая', 'средняя центральная', 'средняя правая',
+        'нижняя левая', 'нижняя центральная', 'нижняя правая',
+    ]
+    zone_labels = [
+        'Верхняя левая', 'Верхняя центральная', 'Верхняя правая',
+        'Средняя левая', 'Центральная', 'Средняя правая',
+        'Нижняя левая', 'Нижняя центральная', 'Нижняя правая',
+    ]
+    zone_counts = zone_df['zone'].value_counts().reindex(zone_order, fill_value=0)
+    zone_pct = zone_counts / len(zone_df) * 100
+
+    fig2, ax2 = plt.subplots(figsize=(11, 6))
+    colors = ['#4C78A8'] * len(zone_order)
+    colors[4] = '#2F855A'
+    bars = ax2.barh(zone_labels, zone_pct.values, color=colors, edgecolor='#26384D', linewidth=0.5)
+    ax2.invert_yaxis()
+    ax2.set_xlabel('Доля аннотаций, %')
+    ax2.set_title('Распределение центров ограничивающих рамок по зонам изображения', fontsize=12)
+    ax2.grid(axis='x', color='#E0E0E0', linewidth=0.8)
+    ax2.set_axisbelow(True)
+    ax2.spines[['top', 'right']].set_visible(False)
+
+    for bar, count, pct in zip(bars, zone_counts.values, zone_pct.values):
+        ax2.text(
+            pct + 0.3,
+            bar.get_y() + bar.get_height() / 2,
+            f'{count} ({pct:.1f}%)',
+            va='center',
+            fontsize=9
+        )
+
+    center_pct = zone_pct.loc['средняя центральная']
+    ax2.text(
+        0,
+        len(zone_order) + 0.25,
+        f'Всего аннотаций: {len(zone_df)}. Центральная зона содержит {center_pct:.1f}% объектов.',
+        fontsize=9,
+        color='#555555'
+    )
     plt.tight_layout()
     plt.savefig(OUTPUT_DIR / 'fig7_bbox_centers_heatmap.png', dpi=150)
     plt.close()
